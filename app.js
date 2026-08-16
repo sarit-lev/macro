@@ -24,6 +24,9 @@ const T = {
     ask_btn:'שאלי', ask_working:'רגע…', ask_failed:'לא הצלחתי להביא תשובה',
     ask_refused:'לא קיבלתי תשובה על המנה הזו', ask_badkey:'המפתח לא תקין',
     conf_high:'הערכה בטוחה', conf_medium:'הערכה סבירה', conf_low:'הערכה גסה, כדאי לבדוק',
+    photo_btn:'📷 צילום מנה', photo_working:'מנתחת…',
+    photo_truncated:'התשובה נקטעה באמצע — נסי תמונה עם פחות מרכיבים',
+    photo_nocomp:'לא זיהיתי מרכיבים בתמונה', dish_total:'סה״כ',
     sec_ai:'התייעצות על מנות', lbl_api_key:'מפתח Anthropic API', api_key_ph:'sk-ant-…',
     lbl_model:'מודל', key_saved:'המפתח נשמר', key_cleared:'המפתח נמחק',
     sec_backup:'גיבוי', share_export:'שיתוף גיבוי', drive_connect:'חיבור לגוגל דרייב',
@@ -59,6 +62,9 @@ const T = {
     ask_btn:'Ask', ask_working:'One moment…', ask_failed:"Couldn't get an answer",
     ask_refused:'No answer returned for that dish', ask_badkey:'That key is not valid',
     conf_high:'confident estimate', conf_medium:'reasonable estimate', conf_low:'rough estimate, worth checking',
+    photo_btn:'📷 Photograph a dish', photo_working:'Analysing…',
+    photo_truncated:'The reply was cut off — try a dish with fewer ingredients',
+    photo_nocomp:'No ingredients recognised in that photo', dish_total:'Total',
     sec_ai:'Ask about a dish', lbl_api_key:'Anthropic API key', api_key_ph:'sk-ant-…',
     lbl_model:'Model', key_saved:'Key saved', key_cleared:'Key cleared',
     sec_backup:'Backup', share_export:'Share backup', drive_connect:'Connect Google Drive',
@@ -352,6 +358,7 @@ function openFood(food){
   document.getElementById('pasteBox').value='';
   document.getElementById('askBox').value='';
   setAskNote('');
+  clearDishPreview();
   document.getElementById('btnDeleteFood').hidden = !food;
   // combos are edited as their computed totals; disabling per-component edit keeps MVP simple
   openSheet('sheetFood');
@@ -436,6 +443,51 @@ const ASK_SYSTEM = [
   'precision you do not have. Write name_he and note in Hebrew.'
 ].join(' ');
 
+/* Photo → ingredient breakdown. Same structured-output rules as FOOD_SCHEMA above:
+   the nested component objects each need additionalProperties:false and a full required list. */
+const DISH_SCHEMA = {
+  type:'object',
+  properties:{
+    dish_name_he:{type:'string', description:'שם קצר וטבעי למנה כולה בעברית'},
+    dish_name_en:{type:'string', description:'Short natural English name for the whole dish'},
+    serving_label:{type:'string', description:'The whole portion in the photo, e.g. "צלחת אחת"'},
+    confidence:{type:'string', enum:['high','medium','low']},
+    note:{type:'string', description:'One short sentence in Hebrew on what was assumed. Empty string if nothing was assumed.'},
+    components:{
+      type:'array',
+      description:'One entry per identifiable ingredient, with the nutrition of the amount present in THIS dish.',
+      items:{
+        type:'object',
+        properties:{
+          name_he:{type:'string'},
+          name_en:{type:'string'},
+          amount_label:{type:'string', description:'How much of this ingredient is in the dish, e.g. "כף" or "80g"'},
+          kcal:{type:'number'},
+          protein_g:{type:'number'},
+          carbs_g:{type:'number'},
+          fat_g:{type:'number'},
+          category:{type:'string', enum:['protein','dairy','carb','veg','fruit','fat','snack','drink','meal']}
+        },
+        required:['name_he','name_en','amount_label','kcal','protein_g','carbs_g','fat_g','category'],
+        additionalProperties:false
+      }
+    }
+  },
+  required:['dish_name_he','dish_name_en','serving_label','confidence','note','components'],
+  additionalProperties:false
+};
+
+const DISH_SYSTEM = [
+  'You break a photographed meal down into its individual ingredients and return structured data.',
+  'The user is in Israel, so assume Israeli supermarket products and home cooking unless the photo says otherwise.',
+  'List every ingredient you can actually see, including cooking oil and dressings you can infer from sheen or texture.',
+  'Each component describes the amount of that ingredient present in THIS dish — not a generic 100g serving.',
+  'State that amount in amount_label, and make the components add up to the whole plate.',
+  'Judge portions against visible references such as the plate rim, cutlery, or a hand.',
+  'Estimate honestly: use low confidence when a portion or a hidden ingredient is a guess,',
+  'and never imply precision you do not have. Write name_he, amount_label and note in Hebrew.'
+].join(' ');
+
 function setAskNote(msg, tone){
   const el = document.getElementById('askNote');
   el.textContent = msg || '';
@@ -502,6 +554,131 @@ function fillFromAsk(f){
   // an estimate is labelled as one — the UI must never present a guess as a measurement
   const label = t('conf_' + (f.confidence || 'medium'));
   setAskNote(f.note ? label + ' · ' + f.note : label, f.confidence==='low' ? 'warn' : '');
+}
+
+/* ---------------- photo → ingredient breakdown ---------------- */
+
+/* A phone photo is 4000px+ and the API caps images at 2576px on the long edge anyway.
+   Downscaling here cuts the upload and the image-token bill without costing recognition. */
+async function fileToResizedJpeg(file, maxEdge = 1568, quality = 0.82){
+  // imageOrientation honours the EXIF rotation phones write instead of rotating pixels
+  const bmp = await createImageBitmap(file, { imageOrientation:'from-image' })
+    .catch(() => createImageBitmap(file));
+  const scale = Math.min(1, maxEdge / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  cv.getContext('2d').drawImage(bmp, 0, 0, w, h);
+  if(bmp.close) bmp.close();
+  const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', quality));
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  // chunked, because String.fromCharCode(...wholeArray) overflows the stack on a big image
+  let bin = '';
+  for(let i=0; i<bytes.length; i+=0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i+0x8000));
+  return btoa(bin);
+}
+
+async function analyseDishPhoto(file){
+  const key = SECRETS.anthropic_key;
+  if(!file || !key) return;
+
+  const btn = document.getElementById('btnPhoto');
+  btn.disabled = true; btn.textContent = t('photo_working');
+  setAskNote(''); clearDishPreview();
+
+  try{
+    const data64 = await fileToResizedJpeg(file);
+    const res = await fetch(API_URL, {
+      method:'POST',
+      headers:{
+        'content-type':'application/json',
+        'x-api-key':key,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify({
+        model: SECRETS.model || DEFAULT_MODEL,
+        // 8000, not the 2048 the text ask uses: thinking is on by default and shares this
+        // budget, and a plate with eight ingredients will truncate mid-JSON at 2048.
+        max_tokens: 8000,
+        // medium, not low: identifying ingredients and splitting macros between them is
+        // meaningfully harder than estimating one known dish.
+        output_config: { effort:'medium', format:{ type:'json_schema', schema:DISH_SCHEMA } },
+        system: DISH_SYSTEM,
+        messages: [{ role:'user', content:[
+          // the image block goes before the text block
+          { type:'image', source:{ type:'base64', media_type:'image/jpeg', data:data64 } },
+          { type:'text', text:'פרקי את המנה שבתמונה למרכיבים.' }
+        ]}]
+      })
+    });
+
+    if(!res.ok){
+      setAskNote(t(res.status===401 || res.status===403 ? 'ask_badkey' : 'ask_failed'), 'bad');
+      return;
+    }
+    const data = await res.json();
+    if(data.stop_reason === 'refusal'){ setAskNote(t('ask_refused'), 'bad'); return; }
+    // caught before JSON.parse — a truncated reply is invalid JSON and would throw instead
+    if(data.stop_reason === 'max_tokens'){ setAskNote(t('photo_truncated'), 'bad'); return; }
+
+    const block = (data.content||[]).find(b => b.type === 'text');
+    if(!block){ setAskNote(t('ask_failed'), 'bad'); return; }
+
+    const dish = JSON.parse(block.text);
+    console.log('[dish]', dish, '\nusage:', data.usage);
+    renderDishPreview(dish);
+  }catch(e){
+    console.warn('dish photo failed', e);
+    setAskNote(t('ask_failed'), 'bad');
+  }finally{
+    btn.disabled = false; btn.textContent = t('photo_btn');
+  }
+}
+
+function clearDishPreview(){
+  const el = document.getElementById('dishResult');
+  el.hidden = true; el.innerHTML = '';
+}
+
+/* Shows the breakdown and fills the form with the dish totals.
+   Nothing is written to the database — saving still stores one atomic food.
+   Turning these components into a real combo record is the next step. */
+function renderDishPreview(d){
+  const comps = Array.isArray(d.components) ? d.components : [];
+  if(!comps.length){ setAskNote(t('photo_nocomp'), 'bad'); return; }
+
+  const sum = comps.reduce((a,c)=>({
+    kcal:    a.kcal    + (Number(c.kcal)||0),
+    protein: a.protein + (Number(c.protein_g)||0),
+    carbs:   a.carbs   + (Number(c.carbs_g)||0),
+    fat:     a.fat     + (Number(c.fat_g)||0)
+  }), {kcal:0, protein:0, carbs:0, fat:0});
+
+  const nm = c => LANG==='he' ? (c.name_he||c.name_en||'') : (c.name_en||c.name_he||'');
+  const rows = comps.map(c=>`<li class="dish__item">
+      <span class="dish__nm">${esc(nm(c))}</span>
+      <span class="dish__amt">${esc(c.amount_label)}</span>
+      <span class="dish__mac" dir="ltr">${rnd(c.kcal)} · ${rnd(c.protein_g)}g</span>
+    </li>`).join('');
+
+  const el = document.getElementById('dishResult');
+  el.innerHTML =
+    `<div class="dish__head">${esc(LANG==='he' ? (d.dish_name_he||d.dish_name_en) : (d.dish_name_en||d.dish_name_he))}` +
+    `<small>${esc(d.serving_label)}</small></div>` +
+    `<ul class="dish__list">${rows}</ul>` +
+    // dir=ltr: a bare "560 · 27g" gets bidi-reordered to "27g · 560" inside the RTL sheet
+    `<div class="dish__total">${t('dish_total')}: <span dir="ltr">${rnd(sum.kcal)} · ${rnd(sum.protein)}g</span></div>`;
+  el.hidden = false;
+
+  const label = t('conf_' + (d.confidence || 'medium'));
+  setAskNote(d.note ? label + ' · ' + d.note : label, d.confidence==='low' ? 'warn' : '');
+
+  const set = (id,v) => { if(v!=null && v!=='') document.getElementById(id).value = v; };
+  set('fName', d.dish_name_he); set('fNameEn', d.dish_name_en);
+  set('fKcal', rnd(sum.kcal)); set('fProtein', rnd(sum.protein));
+  set('fCarbs', rnd(sum.carbs)); set('fFat', rnd(sum.fat));
+  set('fServing', d.serving_label);
+  document.getElementById('fCategory').value = 'meal';
 }
 
 /* No key or offline: the ask box disappears and the paste box carries on as before. */
@@ -764,6 +941,13 @@ function wire(){
   document.getElementById('btnAsk').addEventListener('click', askAboutFood);
   document.getElementById('askBox').addEventListener('keydown', e=>{
     if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); askAboutFood(); }
+  });
+
+  // photo → ingredient breakdown
+  document.getElementById('btnPhoto').addEventListener('click', ()=>document.getElementById('dishPhoto').click());
+  document.getElementById('dishPhoto').addEventListener('change', e=>{
+    if(e.target.files[0]) analyseDishPhoto(e.target.files[0]);
+    e.target.value='';   // so re-picking the same photo fires change again
   });
 
   // secrets: stored on this device only, never exported

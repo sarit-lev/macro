@@ -109,7 +109,10 @@
         <input id="askBox" type="text" data-ph="ask_ph" placeholder="קערת קוטג׳ 5% עם מלפפון וקרקר" autocomplete="off">
         <button class="btn btn--primary ask__go" id="btnAsk" data-i18n="ask_btn">שאלי</button>
       </div>
+      <button class="btn btn--ghost ask__photo" id="btnPhoto" data-i18n="photo_btn">📷 צילום מנה</button>
+      <input id="dishPhoto" type="file" accept="image/*" hidden>
       <p class="asknote" id="askNote" hidden></p>
+      <div class="dish" id="dishResult" hidden></div>
     </div>
     <label class="fld fld--paste">
       <span data-i18n="paste_hint">הדביקי תשובה מ‑Gemini / Claude (kcal + protein) למילוי אוטומטי</span>

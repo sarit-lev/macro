@@ -182,6 +182,21 @@ button{cursor:pointer;border:0;background:none}
 .asknote{margin:.9rem 0 0;font-size:1.25rem;line-height:1.35;color:var(--blue-ink)}
 .asknote--warn{color:var(--orange-ink)}
 .asknote--bad{color:var(--red)}
+.ask__photo{width:100%;margin-top:.8rem;padding:1rem;font-size:1.4rem}
+.ask__photo:disabled{opacity:.55}
+
+/* photo → ingredient breakdown preview */
+.dish{margin-top:1rem;background:var(--surface);border:1.5px solid var(--line);border-radius:var(--r-sm);padding:1rem 1.1rem}
+.dish__head{font-size:1.5rem;font-weight:500;color:var(--ink-strong);display:flex;justify-content:space-between;
+  align-items:baseline;gap:.8rem;margin-bottom:.8rem}
+.dish__head small{font-size:1.2rem;font-weight:400;color:var(--ink-faint);white-space:nowrap}
+.dish__list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.5rem}
+.dish__item{display:grid;grid-template-columns:1fr auto auto;gap:.8rem;align-items:baseline;font-size:1.3rem}
+.dish__nm{color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dish__amt{color:var(--ink-faint);font-size:1.2rem;white-space:nowrap}
+.dish__mac{color:var(--ink-subtle);font-variant-numeric:tabular-nums;white-space:nowrap}
+.dish__total{margin-top:.9rem;padding-top:.8rem;border-top:1px solid var(--line);
+  font-size:1.35rem;font-weight:500;color:var(--ink-strong);font-variant-numeric:tabular-nums}
 
 [hidden]{display:none!important}
 
