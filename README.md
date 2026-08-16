@@ -9,7 +9,8 @@ flat geometric shapes).
 
 ## What it does
 - **One-tap logging** of repeat meals from a frequency-ranked tile grid.
-- **Live daily rings** — protein and calories vs editable targets (default 1200 kcal / 105 g).
+- **Live daily rings** — protein and calories vs editable targets (fresh install starts at
+  1400 kcal / 150 g; a stored value always wins).
 - **Food database** of ~55 seeded Israeli/protein-forward foods + combos; add/edit your own.
 - **Ask about a dish**: describe it in Hebrew in "add food" and the Claude Messages API fills
   kcal, protein, carbs, fat, serving and category. Estimates are labelled with a confidence

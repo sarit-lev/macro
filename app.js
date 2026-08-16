@@ -2,6 +2,8 @@
 'use strict';
 const APP_VERSION = '1.1.0';
 const DEFAULT_MODEL = 'claude-opus-5';
+/* Starting targets for a fresh install only — a stored value always wins. */
+const DEFAULT_KCAL = 1400, DEFAULT_PROTEIN = 150;
 
 /* ---------------- i18n ---------------- */
 const T = {
@@ -102,7 +104,7 @@ const idbDel = (store, key) => new Promise((res,rej)=>{const q=tx(store,'readwri
 function idbBulkPut(store, arr){return new Promise((res,rej)=>{const s=db.transaction(store,'readwrite').objectStore(store);arr.forEach(v=>s.put(v));s.transaction.oncomplete=()=>res();s.transaction.onerror=()=>rej(s.transaction.error);});}
 
 /* ---------------- state ---------------- */
-let SETTINGS = { key:'settings', target_kcal:1200, target_protein_g:105, lang:'he', version:APP_VERSION };
+let SETTINGS = { key:'settings', target_kcal:DEFAULT_KCAL, target_protein_g:DEFAULT_PROTEIN, lang:'he', version:APP_VERSION };
 /* secrets live in their own meta record so exportBackup() can never serialise them */
 let SECRETS = { key:'secrets', anthropic_key:'', model:DEFAULT_MODEL, google_client_id:'', drive_file_id:'', drive_last_backup:0 };
 let FOODS = [];
@@ -750,8 +752,8 @@ function wire(){
     if(protein!=null && !document.getElementById('fProtein').value) document.getElementById('fProtein').value=protein;
   });
 
-  document.getElementById('sKcal').addEventListener('change', async e=>{ SETTINGS.target_kcal=Math.max(1,parseInt(e.target.value)||1200); await saveSettings(); render(); });
-  document.getElementById('sProtein').addEventListener('change', async e=>{ SETTINGS.target_protein_g=Math.max(1,parseInt(e.target.value)||105); await saveSettings(); render(); });
+  document.getElementById('sKcal').addEventListener('change', async e=>{ SETTINGS.target_kcal=Math.max(1,parseInt(e.target.value)||DEFAULT_KCAL); await saveSettings(); render(); });
+  document.getElementById('sProtein').addEventListener('change', async e=>{ SETTINGS.target_protein_g=Math.max(1,parseInt(e.target.value)||DEFAULT_PROTEIN); await saveSettings(); render(); });
   document.getElementById('sLang').addEventListener('change', async e=>{ LANG=e.target.value; applyLang(LANG); await saveSettings(); render(); });
   document.getElementById('btnExport').addEventListener('click', exportBackup);
   document.getElementById('btnShare').addEventListener('click', shareBackup);
