@@ -48,7 +48,7 @@ button{cursor:pointer;border:0;background:none}
 .date{font-size:1.5rem;color:var(--ink-subtle);white-space:nowrap;min-width:6ch;text-align:center}
 .daynav{width:3rem;height:3rem;border-radius:var(--r-pill);color:var(--ink-subtle);font-size:2.2rem;line-height:1;display:grid;place-items:center;transition:background .16s}
 .daynav:active{background:var(--line)}
-.iconbtn{width:4rem;height:4rem;border-radius:var(--r-pill);display:grid;place-items:center;color:var(--ink);background:var(--surface);border:1px solid var(--line);transition:transform .16s,background .16s}
+.iconbtn{flex:0 0 auto;width:4rem;height:4rem;border-radius:var(--r-pill);display:grid;place-items:center;color:var(--ink);background:var(--surface);border:1px solid var(--line);transition:transform .16s,background .16s}
 .iconbtn:active{transform:scale(.94);background:var(--line)}
 
 /* ---------- rings ---------- */
