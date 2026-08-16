@@ -1,6 +1,7 @@
 /* Macro — one-tap nutrition logger. Vanilla JS, IndexedDB, offline-first. */
 'use strict';
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
+const DEFAULT_MODEL = 'claude-opus-5';
 
 /* ---------------- i18n ---------------- */
 const T = {
@@ -12,10 +13,23 @@ const T = {
     paste_hint:'הדביקי תשובה מ‑Gemini / Claude (kcal + protein) למילוי אוטומטי',
     paste_ph:'למשל: 240 קלוריות, 32 גרם חלבון…', serving_ph:'1 גביע 170g',
     lbl_name_he:'שם (עברית)', lbl_name_en:'Name (English)', lbl_kcal:'קלוריות', lbl_protein:'חלבון (g)',
+    lbl_carbs:'פחמימות (g)', lbl_fat:'שומן (g)',
     lbl_serving:'מנה / כמות', lbl_category:'קטגוריה', fav_label:'מועדף (יופיע ראשון)',
     delete:'מחיקה', save:'שמירה', settings:'הגדרות',
     lbl_target_kcal:'יעד קלוריות', lbl_target_protein:'יעד חלבון (g)', lbl_lang:'שפת ממשק',
     export:'ייצוא גיבוי (JSON)', import:'ייבוא מגיבוי', close:'סגירה',
+    ask_hint:'תארי מנה במילים שלך ואמלא את השדות', ask_ph:'קערת קוטג׳ 5% עם מלפפון וקרקר',
+    ask_btn:'שאלי', ask_working:'רגע…', ask_failed:'לא הצלחתי להביא תשובה',
+    ask_refused:'לא קיבלתי תשובה על המנה הזו', ask_badkey:'המפתח לא תקין',
+    conf_high:'הערכה בטוחה', conf_medium:'הערכה סבירה', conf_low:'הערכה גסה, כדאי לבדוק',
+    sec_ai:'התייעצות על מנות', lbl_api_key:'מפתח Anthropic API', api_key_ph:'sk-ant-…',
+    lbl_model:'מודל', key_saved:'המפתח נשמר', key_cleared:'המפתח נמחק',
+    sec_backup:'גיבוי', share_export:'שיתוף גיבוי', drive_connect:'חיבור לגוגל דרייב',
+    drive_disconnect:'ניתוק', drive_backup_now:'גיבוי עכשיו',
+    drive_off:'הגיבוי לדרייב כבוי', drive_never:'עוד לא גובה',
+    drive_ok:'גובה לדרייב {d}', drive_failed:'הגיבוי לדרייב נכשל',
+    drive_reconnect:'צריך להתחבר לגוגל מחדש', drive_saved:'גובה לדרייב',
+    backup_stale:'לא גיבית כבר {n} ימים',
     cat_protein:'חלבון', cat_dairy:'חלב', cat_carb:'פחמימה', cat_veg:'ירקות', cat_fruit:'פירות',
     cat_fat:'שומן', cat_snack:'חטיף', cat_drink:'משקה', cat_meal:'ארוחה',
     today:'היום', yesterday:'אתמול', tomorrow:'מחר',
@@ -33,10 +47,24 @@ const T = {
     paste_hint:'Paste a Gemini / Claude reply (kcal + protein) to auto-fill',
     paste_ph:'e.g. 240 calories, 32 g protein…', serving_ph:'1 cup 170g',
     lbl_name_he:'Name (Hebrew)', lbl_name_en:'Name (English)', lbl_kcal:'Calories', lbl_protein:'Protein (g)',
+    lbl_carbs:'Carbs (g)', lbl_fat:'Fat (g)',
     lbl_serving:'Serving', lbl_category:'Category', fav_label:'Favorite (shown first)',
     delete:'Delete', save:'Save', settings:'Settings',
     lbl_target_kcal:'Calorie target', lbl_target_protein:'Protein target (g)', lbl_lang:'Interface language',
     export:'Export backup (JSON)', import:'Import backup', close:'Close',
+    ask_hint:'Describe a dish in your own words and I will fill the fields',
+    ask_ph:'a bowl of 5% cottage cheese with cucumber and a cracker',
+    ask_btn:'Ask', ask_working:'One moment…', ask_failed:"Couldn't get an answer",
+    ask_refused:'No answer returned for that dish', ask_badkey:'That key is not valid',
+    conf_high:'confident estimate', conf_medium:'reasonable estimate', conf_low:'rough estimate, worth checking',
+    sec_ai:'Ask about a dish', lbl_api_key:'Anthropic API key', api_key_ph:'sk-ant-…',
+    lbl_model:'Model', key_saved:'Key saved', key_cleared:'Key cleared',
+    sec_backup:'Backup', share_export:'Share backup', drive_connect:'Connect Google Drive',
+    drive_disconnect:'Disconnect', drive_backup_now:'Back up now',
+    drive_off:'Drive backup is off', drive_never:'Never backed up',
+    drive_ok:'Backed up to Drive {d}', drive_failed:'Drive backup failed',
+    drive_reconnect:'Reconnect to Google', drive_saved:'Backed up to Drive',
+    backup_stale:"You haven't backed up in {n} days",
     cat_protein:'Protein', cat_dairy:'Dairy', cat_carb:'Carb', cat_veg:'Veg', cat_fruit:'Fruit',
     cat_fat:'Fat', cat_snack:'Snack', cat_drink:'Drink', cat_meal:'Meal',
     today:'Today', yesterday:'Yesterday', tomorrow:'Tomorrow',
@@ -75,6 +103,8 @@ function idbBulkPut(store, arr){return new Promise((res,rej)=>{const s=db.transa
 
 /* ---------------- state ---------------- */
 let SETTINGS = { key:'settings', target_kcal:1200, target_protein_g:105, lang:'he', version:APP_VERSION };
+/* secrets live in their own meta record so exportBackup() can never serialise them */
+let SECRETS = { key:'secrets', anthropic_key:'', model:DEFAULT_MODEL, google_client_id:'', drive_file_id:'', drive_last_backup:0 };
 let FOODS = [];
 let FMAP = {};
 let curDate = todayStr();
@@ -91,10 +121,12 @@ function foodSub(f){ return LANG==='he' ? (f.name_en||'') : (f.name_he||''); }
 function rnd(n){ return Math.round(n); }
 function macrosOf(f){
   if(f.kind==='combo' && Array.isArray(f.components) && f.components.length){
-    let k=0,p=0; for(const c of f.components){ const cf=FMAP[c.id]; if(cf){ const m=macrosOf(cf); k+=m.kcal*c.qty; p+=m.protein*c.qty; } }
-    return {kcal:k, protein:p};
+    let k=0,p=0,c_=0,ft=0;
+    for(const c of f.components){ const cf=FMAP[c.id]; if(cf){ const m=macrosOf(cf); k+=m.kcal*c.qty; p+=m.protein*c.qty; c_+=m.carbs*c.qty; ft+=m.fat*c.qty; } }
+    return {kcal:k, protein:p, carbs:c_, fat:ft};
   }
-  return {kcal:Number(f.kcal)||0, protein:Number(f.protein_g)||0};
+  // carbs/fat are optional — foods predating them read as 0 and are never displayed as a total
+  return {kcal:Number(f.kcal)||0, protein:Number(f.protein_g)||0, carbs:Number(f.carbs_g)||0, fat:Number(f.fat_g)||0};
 }
 function dayTotals(){ let k=0,p=0; for(const e of curDay.entries){ k+=e.kcal*e.qty; p+=e.protein*e.qty; } return {kcal:k, protein:p}; }
 
@@ -104,6 +136,15 @@ function dayTotals(){ let k=0,p=0; for(const e of curDay.entries){ k+=e.kcal*e.q
   const s = await idbGet('meta','settings'); if(s) SETTINGS = Object.assign(SETTINGS, s);
   SETTINGS.version = APP_VERSION;
   LANG = SETTINGS.lang || 'he';
+
+  const sec = await idbGet('meta','secrets'); if(sec) SECRETS = Object.assign(SECRETS, sec);
+  if(!SECRETS.model) SECRETS.model = DEFAULT_MODEL;
+  // a key from a pre-1.1 build could be sitting in settings; move it and scrub it
+  if(SETTINGS.anthropic_key){
+    if(!SECRETS.anthropic_key) SECRETS.anthropic_key = SETTINGS.anthropic_key;
+    delete SETTINGS.anthropic_key;
+    await saveSecrets(); await saveSettings();
+  }
 
   try { FOODS = await idbAll('foods'); } catch(e){ FOODS = []; }
   if(!FOODS.length){
@@ -122,8 +163,11 @@ function dayTotals(){ let k=0,p=0; for(const e of curDay.entries){ k+=e.kcal*e.q
   applyLang(LANG);
   wire();
   render();
+  applyAskAvailability();
+  renderBackupStatus();
   registerSW();
   if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
+  maybeAutoBackup();   // deliberately not awaited: backup must never delay first paint
 })();
 
 function rebuildFmap(){ FMAP = {}; for(const f of FOODS) FMAP[f.id]=f; }
@@ -131,6 +175,7 @@ async function loadDay(date){ const d = await idbGet('days', date); curDay = d |
 async function saveDay(){ await idbPut('days', curDay); }
 async function saveFood(f){ await idbPut('foods', f); rebuildFmap(); }
 async function saveSettings(){ SETTINGS.lang = LANG; await idbPut('meta', SETTINGS); }
+async function saveSecrets(){ await idbPut('meta', SECRETS); }
 
 /* ---------------- rendering ---------------- */
 function applyLang(lang){
@@ -235,7 +280,8 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;'
 async function logFood(id){
   const f = FMAP[id]; if(!f) return;
   const m = macrosOf(f);
-  const entry = { eid:uid(), food_id:id, name_he:f.name_he, name_en:f.name_en, kcal:m.kcal, protein:m.protein, qty:1, at:new Date().toISOString() };
+  const entry = { eid:uid(), food_id:id, name_he:f.name_he, name_en:f.name_en,
+    kcal:m.kcal, protein:m.protein, carbs:m.carbs, fat:m.fat, qty:1, at:new Date().toISOString() };
   curDay.entries.push(entry);
   f.use_count = (f.use_count||0)+1; f.last_used = Date.now();
   await saveDay(); await saveFood(f);
@@ -287,12 +333,23 @@ function openFood(food){
   document.getElementById('foodSheetTitle').textContent = t(food?'food_edit':'food_new');
   document.getElementById('fName').value = food?food.name_he||'':'';
   document.getElementById('fNameEn').value = food?food.name_en||'':'';
-  document.getElementById('fKcal').value = food?(food.kind==='combo'?rnd(macrosOf(food).kcal):food.kcal):'';
-  document.getElementById('fProtein').value = food?(food.kind==='combo'?rnd(macrosOf(food).protein):food.protein_g):'';
+  // a combo shows its computed totals; an atomic food shows its own stored value.
+  // blank stays blank — an unset carbs_g means "unknown", which is not the same as 0.
+  const fieldVal = (key, macroKey) => {
+    if(!food) return '';
+    if(food.kind==='combo') return rnd(macrosOf(food)[macroKey]);
+    return food[key]==null || food[key]==='' ? '' : food[key];
+  };
+  document.getElementById('fKcal').value = fieldVal('kcal','kcal');
+  document.getElementById('fProtein').value = fieldVal('protein_g','protein');
+  document.getElementById('fCarbs').value = fieldVal('carbs_g','carbs');
+  document.getElementById('fFat').value = fieldVal('fat_g','fat');
   document.getElementById('fServing').value = food?food.serving_label||'':'';
   document.getElementById('fCategory').value = food?food.category||'protein':'protein';
   document.getElementById('fFav').checked = food?!!food.favorite:false;
   document.getElementById('pasteBox').value='';
+  document.getElementById('askBox').value='';
+  setAskNote('');
   document.getElementById('btnDeleteFood').hidden = !food;
   // combos are edited as their computed totals; disabling per-component edit keeps MVP simple
   openSheet('sheetFood');
@@ -309,6 +366,12 @@ async function saveFoodFromSheet(){
   // if editing a combo, convert stored totals to atomic so edits stick
   if(f.kind==='combo'){ f.kind='atomic'; f.components=[]; }
   f.kcal=kcal; f.protein_g=protein;
+  // optional: a blank field clears the value rather than storing a fake 0
+  for(const [el,key] of [['fCarbs','carbs_g'],['fFat','fat_g']]){
+    const raw = document.getElementById(el).value.trim();
+    const n = parseFloat(raw);
+    if(raw==='' || isNaN(n)) delete f[key]; else f[key]=n;
+  }
   f.serving_label=document.getElementById('fServing').value.trim();
   f.category=document.getElementById('fCategory').value;
   f.favorite=document.getElementById('fFav').checked;
@@ -336,6 +399,114 @@ function parsePaste(text){
   return { kcal:f(kcal), protein:f(prot) };
 }
 
+/* ---------------- ask about a dish ----------------
+   Direct browser call to the Messages API. The key is Sarit's own and lives only in this
+   device's IndexedDB — it is never in the repo and never in a backup. */
+const API_URL = 'https://api.anthropic.com/v1/messages';
+
+/* Structured outputs: numeric bounds and string-length constraints are not supported,
+   and every object needs additionalProperties:false plus a full required list. */
+const FOOD_SCHEMA = {
+  type:'object',
+  properties:{
+    name_he:{type:'string', description:'שם קצר וטבעי בעברית, בלי כמויות'},
+    name_en:{type:'string', description:'Short natural English name, no quantities'},
+    kcal:{type:'number', description:'Calories for the whole serving described'},
+    protein_g:{type:'number'},
+    carbs_g:{type:'number'},
+    fat_g:{type:'number'},
+    serving_label:{type:'string', description:'The portion these numbers describe, e.g. "1 גביע 170g"'},
+    category:{type:'string', enum:['protein','dairy','carb','veg','fruit','fat','snack','drink','meal']},
+    confidence:{type:'string', enum:['high','medium','low'],
+      description:'high for a packaged product with known values, low for a vague home-cooked portion'},
+    note:{type:'string', description:'One short sentence on what was assumed, in the user language. Empty string if nothing was assumed.'}
+  },
+  required:['name_he','name_en','kcal','protein_g','carbs_g','fat_g','serving_label','category','confidence','note'],
+  additionalProperties:false
+};
+
+const ASK_SYSTEM = [
+  'You estimate nutrition for a single dish and return it as structured data.',
+  'The user is in Israel, so assume Israeli supermarket products and home cooking',
+  '(for example קוטג׳, לבנה, במבה, פיתה, טחינה, שקדי מרק) unless told otherwise.',
+  'If no quantity is given, assume one ordinary serving and state it in serving_label.',
+  'Estimate honestly: use low confidence when the portion is vague, and never imply',
+  'precision you do not have. Write name_he and note in Hebrew.'
+].join(' ');
+
+function setAskNote(msg, tone){
+  const el = document.getElementById('askNote');
+  el.textContent = msg || '';
+  el.hidden = !msg;
+  el.className = 'asknote' + (tone ? ' asknote--'+tone : '');
+}
+
+async function askAboutFood(){
+  const text = document.getElementById('askBox').value.trim();
+  const key = SECRETS.anthropic_key;
+  if(!text || !key) return;
+
+  const btn = document.getElementById('btnAsk');
+  btn.disabled = true; btn.textContent = t('ask_working');
+  setAskNote('');
+
+  try{
+    const res = await fetch(API_URL, {
+      method:'POST',
+      headers:{
+        'content-type':'application/json',
+        'x-api-key':key,
+        'anthropic-version':'2023-06-01',
+        // required for a direct browser call; without it CORS blocks the request
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify({
+        model: SECRETS.model || DEFAULT_MODEL,
+        max_tokens: 2048,          // thinking is on by default and shares this budget
+        output_config: { effort:'low', format:{ type:'json_schema', schema:FOOD_SCHEMA } },
+        system: ASK_SYSTEM,
+        messages: [{ role:'user', content: text }]
+      })
+    });
+
+    if(!res.ok){
+      setAskNote(t(res.status===401 || res.status===403 ? 'ask_badkey' : 'ask_failed'), 'bad');
+      return;
+    }
+    const data = await res.json();
+    // a refusal returns HTTP 200 with empty content — check before reading it
+    if(data.stop_reason === 'refusal'){ setAskNote(t('ask_refused'), 'bad'); return; }
+
+    const block = (data.content||[]).find(b => b.type === 'text');
+    if(!block){ setAskNote(t('ask_failed'), 'bad'); return; }
+    fillFromAsk(JSON.parse(block.text));
+  }catch(e){
+    console.warn('ask failed', e);
+    setAskNote(t('ask_failed'), 'bad');
+  }finally{
+    btn.disabled = false; btn.textContent = t('ask_btn');
+  }
+}
+
+/* Fills the form and stops. Nothing is saved until she taps שמירה. */
+function fillFromAsk(f){
+  const set = (id,v) => { if(v!=null && v!=='') document.getElementById(id).value = v; };
+  set('fName', f.name_he); set('fNameEn', f.name_en);
+  set('fKcal', rnd(f.kcal)); set('fProtein', rnd(f.protein_g));
+  set('fCarbs', rnd(f.carbs_g)); set('fFat', rnd(f.fat_g));
+  set('fServing', f.serving_label);
+  if(f.category) document.getElementById('fCategory').value = f.category;
+
+  // an estimate is labelled as one — the UI must never present a guess as a measurement
+  const label = t('conf_' + (f.confidence || 'medium'));
+  setAskNote(f.note ? label + ' · ' + f.note : label, f.confidence==='low' ? 'warn' : '');
+}
+
+/* No key or offline: the ask box disappears and the paste box carries on as before. */
+function applyAskAvailability(){
+  document.getElementById('askField').hidden = !SECRETS.anthropic_key;
+}
+
 /* ---------------- sheets ---------------- */
 function openSheet(id){ document.getElementById('scrim').hidden=false; document.getElementById(id).hidden=false; }
 function closeSheets(){ document.getElementById('scrim').hidden=true; document.getElementById('sheetFood').hidden=true; document.getElementById('sheetSettings').hidden=true; }
@@ -343,29 +514,194 @@ function openSettings(){
   document.getElementById('sKcal').value = SETTINGS.target_kcal;
   document.getElementById('sProtein').value = SETTINGS.target_protein_g;
   document.getElementById('sLang').value = LANG;
+  document.getElementById('sApiKey').value = SECRETS.anthropic_key || '';
+  document.getElementById('sModel').value = SECRETS.model || DEFAULT_MODEL;
+  document.getElementById('sGoogleId').value = SECRETS.google_client_id || '';
+  renderBackupStatus();
   document.getElementById('verHint').textContent = t('ver',{v:APP_VERSION});
   openSheet('sheetSettings');
 }
 
 /* ---------------- export / import ---------------- */
-async function exportBackup(){
+/* The single place a backup payload is built. Secrets live in their own meta record and
+   are never read here, so no key can reach a file, a share sheet, or Google Drive. */
+async function buildBackup(){
   const days = await idbAll('days');
-  const data = { app:'macro', version:APP_VERSION, exported:new Date().toISOString(), settings:SETTINGS, foods:FOODS, days };
-  const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = `macro-backup-${todayStr()}.json`;
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+  const settings = Object.assign({}, SETTINGS);
+  delete settings.anthropic_key;              // belt and braces against a pre-1.1 record
+  return { app:'macro', version:APP_VERSION, exported:new Date().toISOString(), settings, foods:FOODS, days };
 }
+function backupBlob(data){ return new Blob([JSON.stringify(data,null,2)], {type:'application/json'}); }
+function backupName(){ return `macro-backup-${todayStr()}.json`; }
+
+async function exportBackup(){
+  const blob = backupBlob(await buildBackup());
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = backupName();
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+  await markBackedUp();
+}
+
+/* One tap into Files / Drive / anywhere iOS can share to. Works offline and needs no auth,
+   so this stays the guaranteed way data leaves the phone even if Drive is unavailable. */
+async function shareBackup(){
+  const data = await buildBackup();
+  const file = new File([backupBlob(data)], backupName(), {type:'application/json'});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file], title:'Macro backup'}); await markBackedUp(); }
+    catch(e){ if(e && e.name!=='AbortError') exportBackup(); }
+  } else {
+    exportBackup();
+  }
+}
+
 async function importBackup(file){
   try{
     const data = JSON.parse(await file.text());
     if(!data || !Array.isArray(data.foods)) throw new Error('bad');
-    if(data.settings) { SETTINGS = Object.assign(SETTINGS, data.settings); SETTINGS.version=APP_VERSION; await saveSettings(); }
+    if(data.settings) {
+      const incoming = Object.assign({}, data.settings);
+      delete incoming.anthropic_key;          // never restore a key from a file
+      SETTINGS = Object.assign(SETTINGS, incoming);
+      delete SETTINGS.anthropic_key;          // nor leave a pre-1.1 one sitting in the merge
+      SETTINGS.version=APP_VERSION; await saveSettings();
+    }
     if(data.foods.length){ await idbBulkPut('foods', data.foods); FOODS = await idbAll('foods'); rebuildFmap(); }
     if(Array.isArray(data.days)) await idbBulkPut('days', data.days);
     LANG = SETTINGS.lang||'he'; applyLang(LANG);
     await loadDay(curDate); render(); showToast(t('imported'));
   }catch(e){ showToast(t('bad_file')); }
+}
+
+/* ---------------- google drive backup ----------------
+   Google Identity Services + Drive REST v3, scope drive.file so the app only ever sees
+   files it created itself. The OAuth client ID is public by design and is safe in the repo;
+   only the Anthropic key is device-only.
+
+   Two known limits, both surfaced in the UI rather than failing silently:
+   - a browser client gets no refresh token, so the ~1h access token needs periodic re-auth
+   - GIS opens a popup, which is unreliable inside a standalone iOS home-screen app
+   shareBackup() is always available as the offline, no-auth fallback. */
+const GIS_SRC = 'https://accounts.google.com/gsi/client';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files';
+const BACKUP_INTERVAL_MS = 24*60*60*1000;
+const STALE_BACKUP_DAYS = 14;
+
+let gisReady = null, tokenClient = null, driveToken = '', driveTokenExp = 0;
+
+function loadGIS(){
+  if(gisReady) return gisReady;
+  gisReady = new Promise((res,rej)=>{
+    if(window.google && google.accounts) return res();
+    const s = document.createElement('script');
+    s.src = GIS_SRC; s.async = true; s.defer = true;
+    s.onload = ()=>res(); s.onerror = ()=>rej(new Error('gis load failed'));
+    document.head.appendChild(s);
+  });
+  return gisReady;
+}
+
+/* interactive=false attempts a silent renewal; it only works while the Google session
+   is alive, so a failure here means she has to reconnect by hand. */
+function getDriveToken(interactive){
+  return new Promise(async (res,rej)=>{
+    if(driveToken && Date.now() < driveTokenExp - 60000) return res(driveToken);
+    if(!SECRETS.google_client_id) return rej(new Error('no client id'));
+    try{ await loadGIS(); }catch(e){ return rej(e); }
+
+    if(!tokenClient){
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: SECRETS.google_client_id, scope: DRIVE_SCOPE, callback: ()=>{}
+      });
+    }
+    tokenClient.callback = (r)=>{
+      if(r && r.access_token){
+        driveToken = r.access_token;
+        driveTokenExp = Date.now() + (Number(r.expires_in||3600) * 1000);
+        res(driveToken);
+      } else rej(new Error(r && r.error ? r.error : 'no token'));
+    };
+    tokenClient.error_callback = (e)=>rej(new Error(e && e.type ? e.type : 'auth failed'));
+    try{ tokenClient.requestAccessToken({prompt: interactive ? '' : 'none'}); }
+    catch(e){ rej(e); }
+  });
+}
+
+async function driveUpload(token){
+  const data = await buildBackup();
+  const body = backupBlob(data);
+  const meta = { name: 'macro-backup.json', mimeType: 'application/json' };
+
+  // update the same file when we already own one, so Drive holds one current backup
+  if(SECRETS.drive_file_id){
+    const r = await fetch(`${DRIVE_UPLOAD}/${SECRETS.drive_file_id}?uploadType=media`, {
+      method:'PATCH', headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json'}, body
+    });
+    if(r.ok) return SECRETS.drive_file_id;
+    if(r.status !== 404) throw new Error('drive patch '+r.status);
+    SECRETS.drive_file_id = '';        // someone deleted it in Drive; fall through and recreate
+  }
+
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(meta)], {type:'application/json'}));
+  form.append('file', body);
+  const r = await fetch(`${DRIVE_UPLOAD}?uploadType=multipart&fields=id`, {
+    method:'POST', headers:{Authorization:'Bearer '+token}, body:form
+  });
+  if(!r.ok) throw new Error('drive create '+r.status);
+  return (await r.json()).id;
+}
+
+async function backupToDrive(interactive){
+  if(!SECRETS.google_client_id) return false;
+  try{
+    const token = await getDriveToken(interactive);
+    SECRETS.drive_file_id = await driveUpload(token);
+    SECRETS.drive_last_backup = Date.now();
+    await saveSecrets();
+    renderBackupStatus();
+    if(interactive) showToast(t('drive_saved'));
+    return true;
+  }catch(e){
+    console.warn('drive backup failed', e);
+    renderBackupStatus(interactive ? t('drive_failed') : t('drive_reconnect'));
+    return false;
+  }
+}
+
+async function markBackedUp(){
+  SECRETS.drive_last_backup = Date.now();
+  await saveSecrets(); renderBackupStatus();
+}
+
+function renderBackupStatus(override){
+  const el = document.getElementById('backupStatus'); if(!el) return;
+  if(override){ el.textContent = override; return; }
+  const last = SECRETS.drive_last_backup;
+  if(!SECRETS.google_client_id && !last){ el.textContent = t('drive_off'); return; }
+  if(!last){ el.textContent = t('drive_never'); return; }
+  const d = new Date(last);
+  const z = n => String(n).padStart(2,'0');
+  el.textContent = t('drive_ok', {d:`${z(d.getDate())}/${z(d.getMonth()+1)} ${z(d.getHours())}:${z(d.getMinutes())}`});
+}
+
+/* Runs on open: silent renewal only, throttled to once a day. If the token has expired
+   it fails quietly and the nudge below tells her to reconnect. */
+async function maybeAutoBackup(){
+  if(!SECRETS.google_client_id) return nudgeIfStale();
+  if(Date.now() - (SECRETS.drive_last_backup||0) < BACKUP_INTERVAL_MS) return;
+  const ok = await backupToDrive(false);
+  if(!ok) nudgeIfStale();
+}
+
+function nudgeIfStale(){
+  const last = SECRETS.drive_last_backup || 0;
+  if(!FOODS.length) return;
+  const days = Math.floor((Date.now()-last)/(24*60*60*1000));
+  if(last && days < STALE_BACKUP_DAYS) return;
+  if(!last && !SECRETS.google_client_id) return;   // never set up; don't nag on first run
+  showToast(t('backup_stale',{n:days}), t('share_export'), shareBackup);
 }
 
 /* ---------------- event wiring ---------------- */
@@ -418,8 +754,31 @@ function wire(){
   document.getElementById('sProtein').addEventListener('change', async e=>{ SETTINGS.target_protein_g=Math.max(1,parseInt(e.target.value)||105); await saveSettings(); render(); });
   document.getElementById('sLang').addEventListener('change', async e=>{ LANG=e.target.value; applyLang(LANG); await saveSettings(); render(); });
   document.getElementById('btnExport').addEventListener('click', exportBackup);
+  document.getElementById('btnShare').addEventListener('click', shareBackup);
   document.getElementById('btnImport').addEventListener('click', ()=>document.getElementById('importFile').click());
   document.getElementById('importFile').addEventListener('change', e=>{ if(e.target.files[0]) importBackup(e.target.files[0]); e.target.value=''; });
+
+  // ask about a dish
+  document.getElementById('btnAsk').addEventListener('click', askAboutFood);
+  document.getElementById('askBox').addEventListener('keydown', e=>{
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); askAboutFood(); }
+  });
+
+  // secrets: stored on this device only, never exported
+  document.getElementById('sApiKey').addEventListener('change', async e=>{
+    const v = e.target.value.trim();
+    SECRETS.anthropic_key = v; await saveSecrets();
+    applyAskAvailability(); showToast(t(v ? 'key_saved' : 'key_cleared'));
+  });
+  document.getElementById('sModel').addEventListener('change', async e=>{
+    SECRETS.model = e.target.value.trim() || DEFAULT_MODEL; await saveSecrets();
+  });
+  document.getElementById('sGoogleId').addEventListener('change', async e=>{
+    SECRETS.google_client_id = e.target.value.trim();
+    driveToken=''; driveTokenExp=0; tokenClient=null;   // force a fresh consent on the new id
+    await saveSecrets(); renderBackupStatus();
+  });
+  document.getElementById('btnDrive').addEventListener('click', ()=>backupToDrive(true));
 
   // re-sync to today if app was left open past midnight
   document.addEventListener('visibilitychange', async ()=>{

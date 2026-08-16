@@ -168,6 +168,21 @@ button{cursor:pointer;border:0;background:none}
 .settings-actions .btn{flex:1;padding:1.2rem 1.4rem;font-size:1.4rem}
 .hint{font-size:1.2rem;color:var(--ink-faint);margin:.4rem 0 0;text-align:center}
 
+/* settings section heading */
+.sec{margin:1rem 0 -.4rem;font-size:1.35rem;font-weight:500;color:var(--ink-subtle);
+  letter-spacing:.02em;padding-top:1.2rem;border-top:1px solid var(--line-soft)}
+
+/* ask about a dish */
+.ask{background:var(--blue-bg);border:1.5px solid #D6E4FF;border-radius:var(--r-sm);padding:1.2rem 1.3rem}
+.ask>span{color:var(--blue-ink);font-weight:500}
+.ask__row{display:flex;gap:.8rem;align-items:stretch}
+.ask__row input{flex:1;min-width:0}
+.ask__go{padding:0 1.8rem;font-size:1.45rem;white-space:nowrap}
+.ask__go:disabled{opacity:.55}
+.asknote{margin:.9rem 0 0;font-size:1.25rem;line-height:1.35;color:var(--blue-ink)}
+.asknote--warn{color:var(--orange-ink)}
+.asknote--bad{color:var(--red)}
+
 [hidden]{display:none!important}
 
 @media (prefers-reduced-motion:reduce){

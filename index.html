@@ -103,6 +103,14 @@
     <button class="iconbtn" data-close aria-label="סגירה">✕</button>
   </div>
   <div class="sheet__body">
+    <div class="fld ask" id="askField" hidden>
+      <span data-i18n="ask_hint">תארי מנה במילים שלך ואמלא את השדות</span>
+      <div class="ask__row">
+        <input id="askBox" type="text" data-ph="ask_ph" placeholder="קערת קוטג׳ 5% עם מלפפון וקרקר" autocomplete="off">
+        <button class="btn btn--primary ask__go" id="btnAsk" data-i18n="ask_btn">שאלי</button>
+      </div>
+      <p class="asknote" id="askNote" hidden></p>
+    </div>
     <label class="fld fld--paste">
       <span data-i18n="paste_hint">הדביקי תשובה מ‑Gemini / Claude (kcal + protein) למילוי אוטומטי</span>
       <textarea id="pasteBox" rows="2" data-ph="paste_ph" placeholder="למשל: 240 קלוריות, 32 גרם חלבון…"></textarea>
@@ -114,6 +122,10 @@
     <div class="grid2">
       <label class="fld"><span data-i18n="lbl_kcal">קלוריות</span><input id="fKcal" type="number" inputmode="numeric" dir="ltr"></label>
       <label class="fld"><span data-i18n="lbl_protein">חלבון (g)</span><input id="fProtein" type="number" inputmode="decimal" dir="ltr"></label>
+    </div>
+    <div class="grid2">
+      <label class="fld"><span data-i18n="lbl_carbs">פחמימות (g)</span><input id="fCarbs" type="number" inputmode="decimal" dir="ltr"></label>
+      <label class="fld"><span data-i18n="lbl_fat">שומן (g)</span><input id="fFat" type="number" inputmode="decimal" dir="ltr"></label>
     </div>
     <div class="grid2">
       <label class="fld"><span data-i18n="lbl_serving">מנה / כמות</span><input id="fServing" type="text" data-ph="serving_ph" placeholder="1 גביע 170g"></label>
@@ -154,6 +166,24 @@
     <label class="fld"><span data-i18n="lbl_lang">שפת ממשק</span>
       <select id="sLang"><option value="he">עברית</option><option value="en">English</option></select>
     </label>
+
+    <h3 class="sec" data-i18n="sec_ai">התייעצות על מנות</h3>
+    <label class="fld"><span data-i18n="lbl_api_key">מפתח Anthropic API</span>
+      <input id="sApiKey" type="password" dir="ltr" autocomplete="off" spellcheck="false" data-ph="api_key_ph" placeholder="sk-ant-…">
+    </label>
+    <label class="fld"><span data-i18n="lbl_model">מודל</span>
+      <input id="sModel" type="text" dir="ltr" autocomplete="off" spellcheck="false">
+    </label>
+
+    <h3 class="sec" data-i18n="sec_backup">גיבוי</h3>
+    <label class="fld"><span>Google OAuth client ID</span>
+      <input id="sGoogleId" type="text" dir="ltr" autocomplete="off" spellcheck="false" placeholder="…apps.googleusercontent.com">
+    </label>
+    <p class="hint" id="backupStatus"></p>
+    <div class="settings-actions">
+      <button class="btn btn--ghost" id="btnShare" data-i18n="share_export">שיתוף גיבוי</button>
+      <button class="btn btn--ghost" id="btnDrive" data-i18n="drive_backup_now">גיבוי עכשיו</button>
+    </div>
     <div class="settings-actions">
       <button class="btn btn--ghost" id="btnExport" data-i18n="export">ייצוא גיבוי (JSON)</button>
       <button class="btn btn--ghost" id="btnImport" data-i18n="import">ייבוא מגיבוי</button>
