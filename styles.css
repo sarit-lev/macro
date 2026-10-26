@@ -84,7 +84,7 @@
 }
 
 *{box-sizing:border-box}
-html{font-size:62.5%;-webkit-text-size-adjust:100%}
+html{font-size:62.5%;-webkit-text-size-adjust:100%;touch-action:manipulation} /* no double-tap zoom eating fast taps; pinch zoom stays */
 body{
   margin:0;background:var(--bg);color:var(--label);
   font-family:var(--font);font-size:1.7rem;line-height:1.3;letter-spacing:0;

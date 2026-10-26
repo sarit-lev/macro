@@ -205,7 +205,10 @@ function applyLang(lang){
   const edit = document.getElementById('btnEdit'); if(edit) edit.textContent = t(editMode?'done':'edit');
 }
 
-function render(){ renderDate(); renderRings(); renderRemaining(); renderTiles(); renderEntries(); }
+function render(){ renderDay(); renderTiles(); }
+/* logging, quantity and undo leave the tiles where they are: a tile never jumps away from a finger.
+   The order by use refreshes on the next full render (launch, search, save). */
+function renderDay(){ renderDate(); renderRings(); renderRemaining(); renderEntries(); }
 
 function renderDate(){
   const el = document.getElementById('dateLabel');
@@ -310,7 +313,7 @@ async function logFood(id){
   curDay.entries.push(entry);
   f.use_count = (f.use_count||0)+1; f.last_used = Date.now();
   await saveDay(); await saveFood(f);
-  render();
+  renderDay();
   lastAction = { type:'add', eid:entry.eid };
   showToast(t('added')+' · '+foodName(f), t('undo'), undoLast);
   buzz();
@@ -319,13 +322,13 @@ async function changeQty(i, delta){
   const e = curDay.entries[i]; if(!e) return;
   e.qty += delta;
   if(e.qty<=0){ curDay.entries.splice(i,1); }
-  await saveDay(); render();
+  await saveDay(); renderDay();
 }
 async function removeEntry(i){
   const e = curDay.entries[i]; if(!e) return;
   const removed = Object.assign({}, e);
   curDay.entries.splice(i,1);
-  await saveDay(); render();
+  await saveDay(); renderDay();
   lastAction = { type:'remove', entry:removed, index:i };
   showToast(t('removed')+' · '+(removed['name_'+LANG]||removed.name_he), t('undo'), undoLast);
 }
@@ -337,7 +340,7 @@ async function undoLast(){
   } else if(lastAction.type==='remove'){
     curDay.entries.splice(Math.min(lastAction.index,curDay.entries.length),0,lastAction.entry);
   }
-  lastAction=null; hideToast(); await saveDay(); render();
+  lastAction=null; hideToast(); await saveDay(); renderDay();
 }
 
 /* ---------------- toast ---------------- */
@@ -349,7 +352,19 @@ function showToast(msg, actionLabel, onAction){
   clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, 3200);
 }
 function hideToast(){ document.getElementById('toast').classList.remove('show'); }
-function buzz(){ try{ if(navigator.vibrate) navigator.vibrate(8); }catch(e){} }
+/* haptic tick: Android through vibrate(); iOS Safari 18+ ticks when a switch toggles, so flip a hidden one */
+let hapticLabel = null;
+function buzz(){
+  try{
+    if(navigator.vibrate){ navigator.vibrate(8); return; }
+    if(!hapticLabel){
+      hapticLabel = document.createElement('label'); hapticLabel.setAttribute('aria-hidden','true'); hapticLabel.style.display='none';
+      const sw = document.createElement('input'); sw.type='checkbox'; sw.setAttribute('switch',''); sw.tabIndex=-1;
+      hapticLabel.appendChild(sw); document.body.appendChild(hapticLabel);
+    }
+    hapticLabel.click();
+  }catch(e){}
+}
 
 /* ---------------- food sheet ---------------- */
 let editingId = null;
@@ -992,6 +1007,8 @@ function nudgeIfStale(){
 
 /* ---------------- event wiring ---------------- */
 function wire(){
+  // iOS Safari shows :active press states only when a touch listener exists
+  document.addEventListener('touchstart', ()=>{}, {passive:true});
   // tiles: tap = log, long-press = edit
   const tiles = document.getElementById('tiles');
   let pressTimer=null, longFired=false, startY=0, startX=0;
@@ -1028,8 +1045,8 @@ function wire(){
   });
 
   document.getElementById('search').addEventListener('input', renderTiles);
-  document.getElementById('dayPrev').addEventListener('click', async ()=>{ curDate=shiftDate(curDate,-1); await loadDay(curDate); render(); });
-  document.getElementById('dayNext').addEventListener('click', async ()=>{ if(curDate>=todayStr())return; curDate=shiftDate(curDate,1); await loadDay(curDate); render(); });
+  document.getElementById('dayPrev').addEventListener('click', async ()=>{ curDate=shiftDate(curDate,-1); await loadDay(curDate); renderDay(); });
+  document.getElementById('dayNext').addEventListener('click', async ()=>{ if(curDate>=todayStr())return; curDate=shiftDate(curDate,1); await loadDay(curDate); renderDay(); });
 
   document.getElementById('btnAdd').addEventListener('click', ()=>openFood(null));
   document.getElementById('btnSettings').addEventListener('click', openSettings);
