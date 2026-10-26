@@ -43,6 +43,10 @@ const T = {
     left_protein:'עוד {n}g חלבון', hit_protein:'יעד החלבון הושג ✓',
     saved:'נשמר', need_name:'צריך שם וערכים', confirm_del:'למחוק את המנה מהמאגר?',
     ver:'גרסה {v}', imported:'הגיבוי נטען', bad_file:'קובץ לא תקין',
+    cancel:'ביטול', done:'סיום', edit:'עריכה', my_foods:'המנות שלי',
+    prev_day:'היום הקודם', next_day:'היום הבא', add_food_aria:'הוספת מנה',
+    dec:'הפחתה', inc:'הוספה', remove:'הסרה',
+    unsaved:'יש שינויים שלא נשמרו', discard:'לצאת בלי לשמור', add_named:'הוספת ״{q}״',
   },
   en: {
     ring_protein:'protein · g', ring_kcal:'calories',
@@ -81,9 +85,14 @@ const T = {
     left_protein:'{n}g protein to go', hit_protein:'Protein target hit ✓',
     saved:'Saved', need_name:'Name and values required', confirm_del:'Delete this food from the database?',
     ver:'Version {v}', imported:'Backup loaded', bad_file:'Invalid file',
+    cancel:'Cancel', done:'Done', edit:'Edit', my_foods:'My foods',
+    prev_day:'Previous day', next_day:'Next day', add_food_aria:'Add food',
+    dec:'Decrease', inc:'Increase', remove:'Remove',
+    unsaved:'Unsaved changes', discard:'Discard', add_named:'Add “{q}”',
   }
 };
 let LANG = 'he';
+let editMode = false;   // tiles: tap logs; in edit mode, tap opens the editor
 const t = (k, vars) => { let s = (T[LANG] && T[LANG][k]) || (T.he[k] || k); if (vars) for (const p in vars) s = s.replace('{'+p+'}', vars[p]); return s; };
 
 /* ---------------- IndexedDB ---------------- */
@@ -192,6 +201,8 @@ function applyLang(lang){
   document.documentElement.dir = (lang==='he') ? 'rtl' : 'ltr';
   document.querySelectorAll('[data-i18n]').forEach(el=>{ const k=el.getAttribute('data-i18n'); if(T[lang][k]!=null) el.textContent=T[lang][k]; });
   document.querySelectorAll('[data-ph]').forEach(el=>{ const k=el.getAttribute('data-ph'); if(T[lang][k]!=null) el.placeholder=T[lang][k]; });
+  document.querySelectorAll('[data-i18n-aria]').forEach(el=>{ const k=el.getAttribute('data-i18n-aria'); if(T[lang][k]!=null) el.setAttribute('aria-label', T[lang][k]); });
+  const edit = document.getElementById('btnEdit'); if(edit) edit.textContent = t(editMode?'done':'edit');
 }
 
 function render(){ renderDate(); renderRings(); renderRemaining(); renderTiles(); renderEntries(); }
@@ -203,8 +214,8 @@ function renderDate(){
   else if(curDate===shiftDate(today,-1)) el.textContent = t('yesterday');
   else if(curDate===shiftDate(today,1)) el.textContent = t('tomorrow');
   else { const [y,m,d]=curDate.split('-'); el.textContent = `${d}/${m}`; }
+  document.getElementById('navTitle').textContent = el.textContent;
   document.getElementById('dayNext').disabled = (curDate>=today);
-  document.getElementById('dayNext').style.opacity = (curDate>=today)?.3:1;
 }
 
 const RING_C = 2*Math.PI*52;
@@ -235,7 +246,9 @@ function renderRemaining(){
   el.innerHTML = `<b>${pPart}</b> · ${kPart}`;
 }
 
-const CAT_COLOR = {protein:'var(--green-fill)',dairy:'var(--blue)',carb:'var(--yellow)',veg:'#3FBE7A',fruit:'var(--pink)',fat:'var(--orange)',snack:'var(--orange)',drink:'var(--blue)',meal:'var(--yellow)'};
+/* a favorite gets a star, a combo gets a stack; shape carries the meaning, not color */
+const MARK_FAV = `<svg class="tile__mark tile__mark--fav" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"/></svg>`;
+const MARK_COMBO = `<svg class="tile__mark" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5"/></svg>`;
 function sortFoods(a,b){
   if(!!b.favorite - !!a.favorite) return (!!b.favorite - !!a.favorite);
   if((b.use_count||0)!==(a.use_count||0)) return (b.use_count||0)-(a.use_count||0);
@@ -247,12 +260,16 @@ function renderTiles(){
   if(q) list = list.filter(f => (f.name_he||'').toLowerCase().includes(q) || (f.name_en||'').toLowerCase().includes(q));
   list.sort(sortFoods);
   const wrap = document.getElementById('tiles');
-  if(!list.length){ wrap.innerHTML = `<div class="tiles__empty">${t('no_results')}</div>`; return; }
+  if(!list.length){
+    // an empty result always offers the next step: add what was searched for
+    const raw = (document.getElementById('search').value||'').trim();
+    wrap.innerHTML = `<div class="tiles__empty"><span>${t('no_results')}</span>${raw?`<button class="btn btn--secondary" data-addq>${esc(t('add_named',{q:raw}))}</button>`:''}</div>`;
+    return;
+  }
   wrap.innerHTML = list.map(f=>{
     const m = macrosOf(f);
-    const combo = f.kind==='combo' ? ' tile--combo' : '';
-    return `<button class="tile${combo}" data-id="${f.id}">
-      ${f.favorite?`<span class="tile__fav">★</span>`:`<span class="tile__dot" style="background:${CAT_COLOR[f.category]||'var(--taupe)'}"></span>`}
+    return `<button class="tile" data-id="${f.id}">
+      ${f.favorite ? MARK_FAV : (f.kind==='combo' ? MARK_COMBO : '')}
       <div class="tile__name">${esc(foodName(f))}</div>
       <div class="tile__macros"><span class="tile__p">${rnd(m.protein)}g</span><span class="tile__k">${rnd(m.kcal)} kcal</span></div>
       ${f.serving_label?`<div class="tile__sub">${esc(f.serving_label)}</div>`:''}
@@ -274,11 +291,11 @@ function renderEntries(){
         <div class="entry__meta">${rnd(e.protein*e.qty)}g · ${rnd(e.kcal*e.qty)} kcal${time?' · '+time:''}</div>
       </div>
       <div class="entry__qty">
-        <button class="qbtn" data-act="dec">−</button>
+        <button class="qbtn" data-act="dec" aria-label="${t('dec')}">−</button>
         <span class="entry__q">${e.qty}</span>
-        <button class="qbtn" data-act="inc">+</button>
+        <button class="qbtn" data-act="inc" aria-label="${t('inc')}">+</button>
       </div>
-      <button class="entry__x" data-act="del" aria-label="remove">✕</button>
+      <button class="entry__x" data-act="del" aria-label="${t('remove')}">✕</button>
     </div>`;
   }).join('');
 }
@@ -361,6 +378,7 @@ function openFood(food){
   clearDishPreview();
   document.getElementById('btnDeleteFood').hidden = !food;
   // combos are edited as their computed totals; disabling per-component edit keeps MVP simple
+  foodSnapshot = foodFormState();
   openSheet('sheetFood');
 }
 async function saveFoodFromSheet(){
@@ -686,9 +704,98 @@ function applyAskAvailability(){
   document.getElementById('askField').hidden = !SECRETS.anthropic_key;
 }
 
+/* ---------------- motion: Apple's spring (duration + bounce, WWDC23) ----------------
+   stiffness = (2π/duration)², damping = 4π(1−bounce)/duration, mass 1.
+   Springs start from the current value and velocity, so every move can be interrupted. */
+const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)');
+function spring({from, to, velocity=0, duration=0.42, bounce=0, onUpdate, onDone}){
+  const k = (2*Math.PI/duration)**2, c = 4*Math.PI*(1-bounce)/duration;
+  let x = from, v = velocity, last = performance.now(), raf = 0;
+  const step = now => {
+    const dt = Math.min(0.064, (now-last)/1000); last = now;
+    const n = Math.max(1, Math.ceil(dt/0.004)), h = dt/n;
+    for(let i=0;i<n;i++){ v += (-k*(x-to) - c*v)*h; x += v*h; }
+    if(Math.abs(v)<1 && Math.abs(x-to)<0.5){ onUpdate(to); raf=0; onDone && onDone(); return; }
+    onUpdate(x); raf = requestAnimationFrame(step);
+  };
+  raf = requestAnimationFrame(step);
+  return { stop(){ if(raf) cancelAnimationFrame(raf); raf=0; } };
+}
+/* where a flick is heading (WWDC18 projection, scroll-view deceleration) */
+const project = (v, rate=0.998) => (v/1000)*rate/(1-rate);
+/* resistance past an edge instead of a hard stop */
+const rubberband = (over, dim, c=0.55) => (over*dim*c)/(dim + c*Math.abs(over));
+
 /* ---------------- sheets ---------------- */
-function openSheet(id){ document.getElementById('scrim').hidden=false; document.getElementById(id).hidden=false; }
-function closeSheets(){ document.getElementById('scrim').hidden=true; document.getElementById('sheetFood').hidden=true; document.getElementById('sheetSettings').hidden=true; }
+const SHEET = { el:null, y:0, h:0, anim:null };
+function sheetSetY(y){
+  SHEET.y = y;
+  SHEET.el.style.transform = `translateY(${y}px)`;
+  document.getElementById('scrim').style.opacity = Math.max(0, Math.min(1, 1 - y/SHEET.h));
+}
+function sheetAnimate(to, velocity=0, bounce=0, onDone){
+  if(SHEET.anim) SHEET.anim.stop();
+  SHEET.anim = spring({ from:SHEET.y, to, velocity, duration:0.42, bounce, onUpdate:sheetSetY, onDone });
+}
+function openSheet(id){
+  const el = document.getElementById(id);
+  const reopening = SHEET.el === el;          // grabbed again while closing: continue from where it is
+  if(SHEET.el && !reopening) hideSheetNow();
+  document.getElementById('scrim').hidden = false;
+  el.hidden = false;
+  SHEET.el = el; SHEET.h = el.getBoundingClientRect().height || innerHeight;
+  if(REDUCED_MOTION.matches){ sheetSetY(0); return; }
+  if(!reopening) sheetSetY(SHEET.h);
+  sheetAnimate(0);
+}
+function hideSheetNow(){
+  if(SHEET.anim) SHEET.anim.stop();
+  if(SHEET.el){ SHEET.el.hidden = true; SHEET.el.style.transform = ''; }
+  const s = document.getElementById('scrim'); s.hidden = true; s.style.opacity = '';
+  SHEET.el = null; SHEET.y = 0;
+}
+function closeSheets(velocity){
+  if(typeof velocity !== 'number') velocity = 0;   // also wired straight to click handlers
+  if(!SHEET.el) return;
+  if(REDUCED_MOTION.matches){ hideSheetNow(); return; }
+  sheetAnimate(SHEET.h, velocity, 0, hideSheetNow);
+}
+/* unsaved edits in the food sheet are never dropped by a stray tap or swipe */
+let foodSnapshot = '';
+const FOOD_FIELDS = ['fName','fNameEn','fKcal','fProtein','fCarbs','fFat','fServing','fCategory','fFav','pasteBox','askBox'];
+function foodFormState(){ return FOOD_FIELDS.map(id=>{ const el=document.getElementById(id); return el.type==='checkbox'?el.checked:el.value; }).join('\u0001'); }
+function sheetIsDirty(){ return SHEET.el && SHEET.el.id==='sheetFood' && foodFormState()!==foodSnapshot; }
+function warnUnsaved(){ showToast(t('unsaved'), t('discard'), ()=>{ hideToast(); closeSheets(); }); }
+function closeUnlessDirty(){
+  if(!sheetIsDirty()){ closeSheets(); return; }
+  warnUnsaved();
+  if(!REDUCED_MOTION.matches){ sheetSetY(28); sheetAnimate(0, 0, 0.3); }   // a small nudge: it stays
+}
+function wireSheetDrag(el){
+  const handles = el.querySelectorAll('.sheet__grab, .sheet__bar');
+  handles.forEach(hd => hd.addEventListener('pointerdown', e=>{
+    if(e.target.closest('button') || SHEET.el!==el) return;
+    if(SHEET.anim) SHEET.anim.stop();
+    hd.setPointerCapture(e.pointerId);
+    const startY = e.clientY, y0 = SHEET.y, dirty = sheetIsDirty();
+    const hist = [{y:e.clientY, t:performance.now()}];
+    const move = ev=>{
+      let y = y0 + (ev.clientY - startY);
+      if(y < 0) y = -rubberband(-y, SHEET.h);               // can't pull past fully open
+      else if(dirty) y = rubberband(y, SHEET.h);            // resists, will not dismiss unsaved work
+      sheetSetY(y);
+      hist.push({y:ev.clientY, t:performance.now()}); if(hist.length>5) hist.shift();
+    };
+    const up = ()=>{
+      hd.removeEventListener('pointermove', move); hd.removeEventListener('pointerup', up); hd.removeEventListener('pointercancel', up);
+      const a = hist[0], b = hist[hist.length-1];
+      const v = b.t>a.t ? (b.y-a.y)/((b.t-a.t)/1000) : 0;   // px/s
+      if(!dirty && SHEET.y + project(v) > SHEET.h*0.5) closeSheets(v);
+      else { if(dirty && SHEET.y > 40) warnUnsaved(); sheetAnimate(0, v, Math.abs(v)>300 ? 0.15 : 0); }
+    };
+    hd.addEventListener('pointermove', move); hd.addEventListener('pointerup', up); hd.addEventListener('pointercancel', up);
+  }));
+}
 function openSettings(){
   document.getElementById('sKcal').value = SETTINGS.target_kcal;
   document.getElementById('sProtein').value = SETTINGS.target_protein_g;
@@ -897,8 +1004,16 @@ function wire(){
   tiles.addEventListener('pointerup', ()=>{ clearTimeout(pressTimer); pressTimer=null; });
   tiles.addEventListener('pointercancel', ()=>{ clearTimeout(pressTimer); pressTimer=null; });
   tiles.addEventListener('click', e=>{
+    if(e.target.closest('[data-addq]')){
+      const q = document.getElementById('search').value.trim();
+      openFood(null);
+      document.getElementById(/[֐-׿]/.test(q) ? 'fName' : 'fNameEn').value = q;
+      foodSnapshot = foodFormState();
+      return;
+    }
     const tile = e.target.closest('.tile'); if(!tile) return;
     if(longFired){ longFired=false; return; }
+    if(editMode){ openFood(FMAP[tile.dataset.id]); return; }
     tile.classList.remove('just-added'); void tile.offsetWidth; tile.classList.add('just-added');
     logFood(tile.dataset.id);
   });
@@ -920,8 +1035,22 @@ function wire(){
   document.getElementById('btnSettings').addEventListener('click', openSettings);
   document.getElementById('btnSaveFood').addEventListener('click', saveFoodFromSheet);
   document.getElementById('btnDeleteFood').addEventListener('click', deleteFood);
-  document.getElementById('scrim').addEventListener('click', closeSheets);
-  document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click', closeSheets));
+  document.getElementById('scrim').addEventListener('click', closeUnlessDirty);
+  document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click', ()=>closeSheets()));
+  document.addEventListener('keydown', e=>{ if(e.key==='Escape' && SHEET.el) closeUnlessDirty(); });
+  document.querySelectorAll('.sheet').forEach(wireSheetDrag);
+
+  // tiles have a visible alternative to long-press: an Edit mode
+  document.getElementById('btnEdit').addEventListener('click', ()=>{
+    editMode = !editMode;
+    document.getElementById('tiles').classList.toggle('is-editing', editMode);
+    document.getElementById('btnEdit').textContent = t(editMode?'done':'edit');
+  });
+
+  // large title hands over to the compact title once it scrolls under the bar
+  const nav = document.getElementById('nav');
+  new IntersectionObserver(([en])=>nav.classList.toggle('is-scrolled', !en.isIntersecting),
+    { rootMargin:'-60px 0px 0px 0px' }).observe(document.getElementById('dateLabel'));
 
   document.getElementById('pasteBox').addEventListener('input', e=>{
     const {kcal,protein} = parsePaste(e.target.value);

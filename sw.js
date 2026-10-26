@@ -1,11 +1,10 @@
 /* Macro service worker — offline app shell. Bump CACHE to ship an update. */
-const CACHE = 'macro-v4';
+const CACHE = 'macro-v5';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
-  './assets/labs-font.css',
   './data/seed-foods.json',
   './manifest.webmanifest',
   './icons/icon-192.png',
