@@ -46,7 +46,7 @@ const T = {
     cancel:'ביטול', done:'סיום', edit:'עריכה', my_foods:'המנות שלי',
     prev_day:'היום הקודם', next_day:'היום הבא', add_food_aria:'הוספת מנה',
     dec:'הפחתה', inc:'הוספה', remove:'הסרה',
-    unsaved:'יש שינויים שלא נשמרו', discard:'לצאת בלי לשמור', add_named:'הוספת ״{q}״',
+    clear:'ניקוי', close_search:'סגירת החיפוש', unsaved:'יש שינויים שלא נשמרו', discard:'לצאת בלי לשמור', add_named:'הוספת ״{q}״',
   },
   en: {
     ring_protein:'protein · g', ring_kcal:'calories',
@@ -88,7 +88,7 @@ const T = {
     cancel:'Cancel', done:'Done', edit:'Edit', my_foods:'My foods',
     prev_day:'Previous day', next_day:'Next day', add_food_aria:'Add food',
     dec:'Decrease', inc:'Increase', remove:'Remove',
-    unsaved:'Unsaved changes', discard:'Discard', add_named:'Add “{q}”',
+    clear:'Clear', close_search:'Close search', unsaved:'Unsaved changes', discard:'Discard', add_named:'Add “{q}”',
   }
 };
 let LANG = 'he';
@@ -261,7 +261,9 @@ function renderTiles(){
   const q = (document.getElementById('search').value||'').trim().toLowerCase();
   let list = FOODS.slice();
   if(q) list = list.filter(f => (f.name_he||'').toLowerCase().includes(q) || (f.name_en||'').toLowerCase().includes(q));
-  list.sort(sortFoods);
+  // best match first: a name that starts with the query beats one that only contains it
+  const starts = f => q && ((f.name_he||'').toLowerCase().startsWith(q) || (f.name_en||'').toLowerCase().startsWith(q)) ? 0 : 1;
+  list.sort((a,b) => (starts(a)-starts(b)) || sortFoods(a,b));
   const wrap = document.getElementById('tiles');
   if(!list.length){
     // an empty result always offers the next step: add what was searched for
@@ -1005,6 +1007,57 @@ function nudgeIfStale(){
   showToast(t('backup_stale',{n:days}), t('share_export'), shareBackup);
 }
 
+/* ---------------- search mode ----------------
+   Focusing search hides the day and turns the foods into a compact result list that sits
+   directly above the field, best match nearest to it. The dock rides above the keyboard. */
+let searching = false;
+function afterSearchRender(){
+  document.getElementById('btnSearchClear').hidden = !document.getElementById('search').value;
+  if(searching) requestAnimationFrame(()=>window.scrollTo(0, document.documentElement.scrollHeight));
+}
+function setSearching(on){
+  if(searching === on) return;
+  searching = on;
+  if(on && editMode) document.getElementById('btnEdit').click();   // a search tap logs, never edits
+  document.body.classList.toggle('is-searching', on);
+  document.getElementById('btnAdd').hidden = on;
+  document.getElementById('btnSearchClose').hidden = !on;
+  afterSearchRender();
+}
+function exitSearch(){
+  const s = document.getElementById('search');
+  s.value = ''; s.blur();
+  setSearching(false);
+  renderTiles(); afterSearchRender();
+  window.scrollTo(0, 0);
+}
+function wireSearch(){
+  const s = document.getElementById('search');
+  s.addEventListener('focus', ()=>setSearching(true));
+  s.addEventListener('input', ()=>{ renderTiles(); afterSearchRender(); });
+  s.addEventListener('keydown', e=>{
+    if(e.key==='Enter'){ e.preventDefault(); const top = document.querySelector('#tiles .tile'); if(top) top.click(); }
+    if(e.key==='Escape') exitSearch();
+  });
+  document.getElementById('searchBox').addEventListener('click', e=>{ if(!e.target.closest('button')) s.focus(); });
+  // keep focus on the field: pointerdown would otherwise blur it and drop the keyboard
+  const clear = document.getElementById('btnSearchClear');
+  clear.addEventListener('pointerdown', e=>e.preventDefault());
+  clear.addEventListener('click', ()=>{ s.value=''; s.focus(); renderTiles(); afterSearchRender(); });
+  document.getElementById('btnSearchClose').addEventListener('click', exitSearch);
+
+  // lift the dock above the on-screen keyboard (iOS keeps fixed elements behind it)
+  if(window.visualViewport){
+    const vv = window.visualViewport, root = document.documentElement;
+    const place = ()=>{
+      const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      root.style.setProperty('--kb', kb+'px');
+      root.classList.toggle('kb-open', kb > 80);
+    };
+    vv.addEventListener('resize', place); vv.addEventListener('scroll', place); place();
+  }
+}
+
 /* ---------------- event wiring ---------------- */
 function wire(){
   // iOS Safari shows :active press states only when a touch listener exists
@@ -1023,6 +1076,7 @@ function wire(){
   tiles.addEventListener('click', e=>{
     if(e.target.closest('[data-addq]')){
       const q = document.getElementById('search').value.trim();
+      exitSearch();
       openFood(null);
       document.getElementById(/[֐-׿]/.test(q) ? 'fName' : 'fNameEn').value = q;
       foodSnapshot = foodFormState();
@@ -1033,6 +1087,7 @@ function wire(){
     if(editMode){ openFood(FMAP[tile.dataset.id]); return; }
     tile.classList.remove('just-added'); void tile.offsetWidth; tile.classList.add('just-added');
     logFood(tile.dataset.id);
+    if(searching) exitSearch();   // found it, logged it, back to the day
   });
 
   // entries: qty + / - , delete
@@ -1044,7 +1099,7 @@ function wire(){
     else if(act==='del') removeEntry(i);
   });
 
-  document.getElementById('search').addEventListener('input', renderTiles);
+  wireSearch();
   document.getElementById('dayPrev').addEventListener('click', async ()=>{ curDate=shiftDate(curDate,-1); await loadDay(curDate); renderDay(); });
   document.getElementById('dayNext').addEventListener('click', async ()=>{ if(curDate>=todayStr())return; curDate=shiftDate(curDate,1); await loadDay(curDate); renderDay(); });
 

@@ -358,3 +358,36 @@ button:disabled{cursor:default}
   .ring__val{font-size:2.8rem}
   .grid2{grid-template-columns:1fr}
 }
+
+/* ---------- search mode ----------
+   The day steps aside; results become a compact list anchored right above the field,
+   best match nearest to it. The dock rides above the keyboard (--kb, from visualViewport). */
+.dock{transform:translateY(calc(-1 * var(--kb,0px)))}
+.kb-open .dock__bar{padding-bottom:8px}
+.kb-open .dock__edge{opacity:0}
+
+.search__clear{flex:0 0 auto;width:44px;height:44px;margin-inline-end:-12px;display:grid;place-items:center;color:var(--label-3);border-radius:999px}
+.search__clear:active{color:var(--label-2)}
+
+.is-searching .nav,
+.is-searching .largetitle,
+.is-searching .summary,
+.is-searching .remaining,
+.is-searching #entriesWrap,
+.is-searching .section__head{display:none}
+.is-searching .app{min-height:100dvh;display:flex;flex-direction:column;justify-content:flex-end;
+  padding-top:calc(16px + env(safe-area-inset-top));
+  padding-bottom:calc(84px + env(safe-area-inset-bottom) + var(--kb,0px))}
+.kb-open .is-searching .app{padding-bottom:calc(72px + var(--kb,0px))}
+.is-searching .section{margin-bottom:0}
+
+/* results: one inset list, best match at the bottom next to the field */
+.is-searching .tiles{display:flex;flex-direction:column-reverse;gap:0;background:var(--surface);border-radius:var(--r-card);overflow:hidden}
+.is-searching .tiles:has(.tiles__empty){background:none}
+.is-searching .tile{flex-direction:row;align-items:center;justify-content:flex-start;gap:12px;min-height:56px;padding:8px 16px;border-radius:0}
+.is-searching .tile:not(:first-child)::before{content:"";position:absolute;bottom:0;inset-inline-start:16px;inset-inline-end:0;height:.5px;background:var(--separator)}
+.is-searching .tile__mark{position:static;flex:0 0 auto}
+.is-searching .tile__name{flex:1;min-width:0;padding-inline-end:0;-webkit-line-clamp:1;line-clamp:1}
+.is-searching .tile__sub{display:none}
+.is-searching .tile__macros{flex:0 0 auto}
+.is-searching .tile:not(:has(.tile__mark)) .tile__name{padding-inline-start:28px}   /* names line up with or without a mark */
