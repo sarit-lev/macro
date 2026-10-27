@@ -209,6 +209,15 @@ function render(){ renderDay(); renderTiles(); }
 /* logging, quantity and undo leave the tiles where they are: a tile never jumps away from a finger.
    The order by use refreshes on the next full render (launch, search, save). */
 function renderDay(){ renderDate(); renderRings(); renderRemaining(); renderEntries(); }
+/* the day's list sits above the tiles, so a logged row would push every tile down under the finger.
+   Measure the tiles before and after and scroll by the difference. */
+function renderDayKeepTiles(){
+  const tiles = document.getElementById('tiles');
+  const before = tiles.getBoundingClientRect().top;
+  renderDay();
+  const shift = tiles.getBoundingClientRect().top - before;
+  if(shift) window.scrollBy(0, shift);
+}
 
 function renderDate(){
   const el = document.getElementById('dateLabel');
@@ -315,7 +324,7 @@ async function logFood(id){
   curDay.entries.push(entry);
   f.use_count = (f.use_count||0)+1; f.last_used = Date.now();
   await saveDay(); await saveFood(f);
-  renderDay();
+  renderDayKeepTiles();
   lastAction = { type:'add', eid:entry.eid };
   showToast(t('added')+' · '+foodName(f), t('undo'), undoLast);
   buzz();
@@ -342,7 +351,7 @@ async function undoLast(){
   } else if(lastAction.type==='remove'){
     curDay.entries.splice(Math.min(lastAction.index,curDay.entries.length),0,lastAction.entry);
   }
-  lastAction=null; hideToast(); await saveDay(); renderDay();
+  lastAction=null; hideToast(); await saveDay(); renderDayKeepTiles();
 }
 
 /* ---------------- toast ---------------- */
