@@ -1,5 +1,5 @@
 /* Macro service worker — offline app shell. Bump CACHE to ship an update. */
-const CACHE = 'macro-v7';
+const CACHE = 'macro-v8';
 const ASSETS = [
   './',
   './index.html',
